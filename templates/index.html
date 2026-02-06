@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="h-screen max-w-lg mx-auto flex flex-col p-4">
+    
+    <header class="text-center py-4">
+        <h1 class="text-3xl font-black tracking-tighter text-blue-600 italic">P-SJEKK</h1>
+        <p class="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Sanntidsoppslag • Autosys</p>
+    </header>
+
+    <div class="bg-white p-4 rounded-3xl shadow-xl shadow-blue-900/5 mb-4 border border-slate-100">
+        <div class="flex gap-2">
+            <input type="text" id="plate" placeholder="AB 12345" 
+                class="flex-grow p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl uppercase font-mono text-xl focus:border-blue-500 focus:bg-white outline-none transition-all">
+            <button onclick="performLookup()" id="searchBtn" 
+                class="bg-blue-600 text-white px-6 rounded-2xl font-black hover:bg-blue-700 active:scale-95 disabled:opacity-50 transition-all shadow-lg shadow-blue-600/30">
+                SØK
+            </button>
+        </div>
+    </div>
+
+    <div id="vehicle-card" class="hidden bg-slate-900 text-white p-4 rounded-2xl mb-4 flex justify-between items-center shadow-lg">
+        <div class="flex flex-col">
+            <span class="text-[9px] uppercase font-black text-blue-400 mb-1 tracking-wider">Kjøretøy Bekreftet</span>
+            <span id="vehicle-name" class="font-bold text-base uppercase"></span>
+        </div>
+        <div class="text-right">
+            <span id="vehicle-meta" class="text-[10px] bg-white/10 px-2 py-1 rounded font-bold uppercase tracking-tight"></span>
+        </div>
+    </div>
+
+    <div id="provider-list" class="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+        <div id="placeholder-msg" class="h-full flex flex-col items-center justify-center text-slate-300 opacity-50">
+            <p class="text-xs font-bold uppercase tracking-widest italic">Venter på skiltnummer...</p>
+        </div>
+    </div>
+
+    <div id="summary" class="hidden mt-4 p-5 rounded-3xl text-center shadow-2xl transition-all duration-500 transform">
+        <p id="summary-text" class="text-sm font-bold"></p>
+    </div>
+</div>
+
+<script>
+async function performLookup() {
+    const plateInput = document.getElementById('plate');
+    const rawPlate = plateInput.value.trim().toUpperCase();
+    const cleanPlate = rawPlate.replace(/\s/g, '');
+    
+    // UI References
+    const list = document.getElementById('provider-list');
+    const summary = document.getElementById('summary');
+    const vehCard = document.getElementById('vehicle-card');
+    const searchBtn = document.getElementById('searchBtn');
+    const vehName = document.getElementById('vehicle-name');
+    const vehMeta = document.getElementById('vehicle-meta');
+
+    // 1. Regex Guard (Validates common Norwegian formats)
+    const plateRegex = /^[A-Z]{2}[0-9]{5}$|^[A-Z]{3}[0-9]{4}$|^[A-Z]{2}[0-9]{4}$/;
+    if (!plateRegex.test(cleanPlate)) {
+        alert("Ugyldig format. Vennligst bruk et ekte norsk skiltnummer.");
+        return;
+    }
+
+    // Reset UI
+    list.innerHTML = '';
+    summary.classList.add('hidden');
+    vehCard.classList.add('hidden');
+    searchBtn.disabled = true;
+
+    const portals = {
+        'autopay': 'https://autopay.io', 'timepark': 'https://pay.timepark.no/',
+        'onepark': 'https://onepark.no/en/autopay/', 'aimo': 'https://qpark-betaling.giantleap.no/',
+        'apcoa': 'https://flow.apcoa.no/transaction-list-search', 'parkpay': 'https://betaling.parkpay.no/',
+        'parkly': 'https://pay.parkly.no/'
+    };
+
+    try {
+        // 2. Initial Vehicle Check (AUTOSYS)
+        const vehResp = await fetch(`/api/lookup/${cleanPlate}`);
+        
+        if (vehResp.status === 404) {
+            alert("Skiltnummeret finnes ikke i Autosys. Sjekk for skrivefeil.");
+            searchBtn.disabled = false;
+            return; // STOP: Don't check providers if car isn't real
+        }
+
+        const vehData = await vehResp.json();
+        vehName.innerText = `${vehData.vehicle.make} ${vehData.vehicle.model}`;
+        vehMeta.innerText = `${vehData.vehicle.color} • ${vehData.vehicle.year}`;
+        vehCard.classList.remove('hidden');
+
+        // 3. Provider Sequence
+        const providers = {{ providers|tojson }};
+        let foundCount = 0;
+
+        for (const p of providers) {
+            const row = document.createElement('div');
+            row.className = "p-4 bg-white border border-slate-100 rounded-2xl flex justify-between items-center shadow-sm";
+            row.innerHTML = `<span class="text-xs font-bold text-slate-400 italic">Søker hos ${p.name}...</span> <div class="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>`;
+            list.appendChild(row);
+
+            const resp = await fetch(`/api/check/${p.id}/${cleanPlate}`);
+            const result = await resp.json();
+
+            if (result.status) {
+                foundCount++;
+                const payUrl = portals[p.id] || '#';
+                row.className = "p-4 bg-red-50 border-2 border-red-200 rounded-2xl flex justify-between items-center";
+                row.innerHTML = `
+                    <div class="flex flex-col">
+                        <span class="font-black text-red-600 text-xs uppercase tracking-tight">${p.name}</span>
+                        <a href="${payUrl}" target="_blank" class="text-[9px] text-red-500 underline font-bold uppercase mt-1">Betal nå ↗</a>
+                    </div>
+                    <span class="bg-red-600 text-white px-3 py-1 rounded-full text-[9px] font-black uppercase shadow-lg shadow-red-200">UBETALT</span>
+                `;
+            } else {
+                row.className = "p-4 bg-white border border-slate-100 rounded-2xl flex justify-between items-center opacity-60";
+                row.innerHTML = `<span class="text-xs font-bold text-slate-400">${p.name}</span> <span class="text-emerald-500 font-black text-[10px]">OK</span>`;
+            }
+        }
+
+        // 4. Summary
+        const timestamp = new Date().toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' });
+        const summaryText = document.getElementById('summary-text');
+
+        if (foundCount > 0) {
+            summaryText.innerHTML = `<div>Fant ${foundCount} ubetalte krav.</div><div class="text-[9px] opacity-60 font-normal mt-1">Sist oppdatert kl. ${timestamp}</div>`;
+            summary.className = "p-5 bg-red-600 text-white rounded-[2rem] text-center shadow-2xl animate-pulse";
+        } else {
+            summaryText.innerHTML = `<div>✓ Ingen ubetalte parkeringer funnet.</div><div class="text-[9px] opacity-60 font-normal mt-1">Sist oppdatert kl. ${timestamp}</div>`;
+            summary.className = "p-5 bg-emerald-500 text-white rounded-[2rem] text-center shadow-2xl border-b-8 border-emerald-600";
+        }
+        summary.classList.remove('hidden');
+
+    } catch (err) {
+        alert("En teknisk feil oppstod. Prøv igjen.");
+    } finally {
+        searchBtn.disabled = false;
+    }
+}
+</script>
+{% endblock %}
