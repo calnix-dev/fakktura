@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="nb">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fakktura – sjekk ubetalt parkering</title>
+  <meta name="description" content="Slå opp bilskiltet ditt hos norske parkeringsselskaper og betal før fakturagebyret kommer.">
+  <meta name="theme-color" content="#0f172a">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <!-- Plain (non-module) scripts so the page also works when opened from disk (file://). -->
+  <script defer src="config.js"></script>
+  <script defer src="providers.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="brand">
+      <h1>fakk<span>tura</span></h1>
+      <p>Har du parkert et sted med «betal senere»? Slå opp skiltet ditt før gebyret kommer.</p>
+    </header>
+
+    <form id="search" class="search" autocomplete="off" novalidate>
+      <label class="plate" for="plate">
+        <span class="plate__eu" aria-hidden="true"><span class="plate__flag"></span>N</span>
+        <input id="plate" name="plate" inputmode="text" autocapitalize="characters" spellcheck="false"
+               maxlength="9" placeholder="AB 12345" aria-label="Registreringsnummer" required>
+      </label>
+      <button id="go" type="submit" class="btn btn--primary">Søk</button>
+    </form>
+    <p id="hint" class="hint" role="status"></p>
+
+    <ul id="recent" class="recent" aria-label="Siste søk"></ul>
+
+    <section id="vehicle" class="vehicle" hidden aria-live="polite"></section>
+
+    <section id="summary" class="summary" hidden aria-live="polite"></section>
+
+    <ul id="results" class="results" aria-label="Parkeringsselskaper"></ul>
+
+    <section class="about">
+      <details>
+        <summary>Hvordan fungerer dette?</summary>
+        <p>Siden spør parkeringsselskapenes egne «betal uten app»-tjenester om det finnes ubetalte parkeringer for skiltet. Oppslaget gjøres fra nettleseren din, og skiltet lagres ikke noe sted utenom (valgfritt) i nettleseren din.</p>
+        <p>Noen selskaper krever at du velger parkeringsplass før du kan søke. Disse får en lenke i stedet for et automatisk svar.</p>
+        <p>Et «ingenting funnet» er ingen garanti: registreringer kan ta litt tid å dukke opp, og listen dekker ikke alle selskaper. Ved tvil, sjekk skiltene på plassen.</p>
+      </details>
+    </section>
+
+    <footer class="foot">
+      <span>Ikke tilknyttet noen av parkeringsselskapene.</span>
+      <button id="theme" class="link" type="button">Bytt tema</button>
+    </footer>
+  </main>
+
+  <template id="row">
+    <li class="row" data-state="pending">
+      <div class="row__main">
+        <span class="row__name"></span>
+        <span class="row__hint"></span>
+      </div>
+      <span class="row__status"><span class="spinner" aria-hidden="true"></span><span class="row__label">Søker…</span></span>
+      <ul class="row__items" hidden></ul>
+      <a class="row__action btn" target="_blank" rel="noopener noreferrer" hidden></a>
+    </li>
+  </template>
+</body>
+</html>
