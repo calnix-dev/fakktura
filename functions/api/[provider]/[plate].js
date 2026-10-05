@@ -39,6 +39,48 @@ const LOCAL = {
   vestpark: (plate, ua) => getJson(ua, `https://unum.vestpark.no/Auth/SearchParkingSessionPayment?licensePlate=${plate}`),
 };
 
+// --- Bot filtering -------------------------------------------------------
+//
+// Cheap filters that keep scanners and generic bots away from the
+// operators. None of this stops a determined person (they can copy the
+// header and fake a browser), but it means nothing reaches an operator
+// unless the request looks like it came from our own page.
+
+// Sent by site/app.js on every /api call. Same-origin, so no CORS preflight.
+const CLIENT_HEADER = "X-Fakktura";
+
+// Obvious scripting tools and crawlers. Real browsers never match.
+const BOT_UA = /bot|crawl|spider|slurp|curl|wget|python|httpx|aiohttp|go-http|java\/|okhttp|axios|node-fetch|undici|libwww|scrapy|headless|phantom|postman|insomnia|zgrab|masscan|nmap|nikto|sqlmap/i;
+
+// Soft per-IP limit. Each search makes 5 calls here, so this allows about
+// six searches a minute. It is per edge instance, not global, so it
+// only catches bursts, which is what scripted lookups look like.
+const RATE_LIMIT = 30;
+const RATE_WINDOW_MS = 60_000;
+const hits = new Map();
+
+function overLimit(ip) {
+  const now = Date.now();
+  const recent = (hits.get(ip) || []).filter((t) => now - t < RATE_WINDOW_MS);
+  recent.push(now);
+  hits.set(ip, recent);
+  if (hits.size > 5000) hits.clear(); // keep memory bounded
+  return recent.length > RATE_LIMIT;
+}
+
+function looksLikeOurPage(request) {
+  if (request.headers.get(CLIENT_HEADER) !== "1") return false;
+  // Browsers send this automatically and scripts on other sites can't change
+  // it. Missing on old browsers, so only reject an explicit other-site value.
+  const site = request.headers.get("Sec-Fetch-Site");
+  if (site && site !== "same-origin") return false;
+  return !BOT_UA.test(request.headers.get("User-Agent") || "bot");
+}
+
+// Every rejection gets the same bland answer, so probing reveals nothing
+// about which part was wrong.
+const notFound = () => json({ error: "Not found" }, 404);
+
 const UPSTREAMS = {
   // Same request autopay.io's "betal uten app" page makes.
   autopay: (plate, env, ua) => fetchJson(ua, `https://selfservice-api-run.autopay.io/sessions/v2/unpaid/${plate}`),
@@ -46,11 +88,15 @@ const UPSTREAMS = {
   // qpark-betaling.giantleap.no (Aimo Park / Q-Park).
   aimo: (plate, env, ua) => fetchJson(ua, `https://qpark-autopark.giantleap.net/public/rest/pah/license-plate/${plate}/lookup`),
 
-  // flow.apcoa.no "Søk opp parkering". Replies 404 + plain text when there
-  // is nothing to pay, so normalise that to an empty list.
+  // flow.apcoa.no "Søk opp parkering". Replies 404 + "Fant ingen ubetalte
+  // parkeringer for …" when there is nothing to pay. Only that exact reply
+  // means "nothing found"; any other 404 (e.g. a moved endpoint) is an error.
   apcoa: async (plate, env, ua) => {
     const res = await upstream(ua, `https://flow.apcoa.no/api/transactions/${plate}`);
-    if (res.status === 404) return json([]);
+    if (res.status === 404) {
+      const text = await res.text();
+      return /fant ingen ubetalte/i.test(text) ? json([]) : json({ error: "Unexpected upstream response" }, 502);
+    }
     return passthrough(res);
   },
 
@@ -98,16 +144,33 @@ const UPSTREAMS = {
 };
 
 export async function onRequestGet({ request, params, env, waitUntil }) {
-  const provider = String(params.provider);
-  const plate = String(params.plate).toUpperCase();
-  const handler = Object.hasOwn(UPSTREAMS, provider) ? UPSTREAMS[provider] : null;
+  if (!looksLikeOurPage(request)) return notFound();
 
-  if (!handler) return json({ error: "Unknown provider" }, 404);
-  if (!PLATE.test(plate)) return json({ error: "Invalid plate" }, 400);
+  const provider = String(params.provider);
+  const handler = Object.hasOwn(UPSTREAMS, provider) ? UPSTREAMS[provider] : null;
+  if (!handler) return notFound();
+
+  // The path segment arrives percent-encoded (Æ → %C3%86).
+  let plate;
+  try {
+    plate = decodeURIComponent(String(params.plate)).toUpperCase();
+  } catch {
+    plate = "";
+  }
+  if (!PLATE.test(plate)) return notFound();
+
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  if (overLimit(ip)) {
+    const res = json({ error: "Too many requests" }, 429);
+    res.headers.set("Retry-After", "60");
+    return res;
+  }
+  // From here on the plate is only [A-ZÆØÅ0-9]; encode it for upstream URLs.
+  const urlPlate = encodeURIComponent(plate);
 
   // Edge cache keyed on the normalised URL. (The Cache API is a no-op on
   // *.pages.dev preview URLs, but works on the custom domain.)
-  const cacheKey = new Request(new URL(`/api/${provider}/${plate}`, request.url));
+  const cacheKey = new Request(new URL(`/api/${provider}/${urlPlate}`, request.url));
   const cache = caches.default;
   const hit = await cache.match(cacheKey);
   if (hit) return hit;
@@ -117,9 +180,9 @@ export async function onRequestGet({ request, params, env, waitUntil }) {
 
   let res;
   try {
-    res = await handler(plate, env, userAgent);
-  } catch (err) {
-    return json({ error: "Upstream failed", detail: String(err) }, 502);
+    res = await handler(urlPlate, env, userAgent);
+  } catch {
+    return json({ error: "Upstream failed" }, 502);
   }
   if (res.status === 200 && !/max-age=0\b/.test(res.headers.get("Cache-Control"))) {
     waitUntil(cache.put(cacheKey, res.clone()));
@@ -162,6 +225,8 @@ function json(data, status = 200, maxAge = CACHE_SECONDS) {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
+      "X-Content-Type-Options": "nosniff",
+      "X-Robots-Tag": "noindex, nofollow",
       // The answer is the same for anyone asking about the plate (the
       // upstreams are public), so a shared cache is fine. The Cache API
       // also refuses to store `private`. Errors are never cached.

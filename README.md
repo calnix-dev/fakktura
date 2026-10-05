@@ -37,7 +37,7 @@ functions/index.js                    Makes link-preview URLs absolute on "/"
 wrangler.toml                         Pages configuration
 ```
 
-The browser does all the lookups. Operators that allow cross-origin requests (ParkPay) are called directly. The rest go through `/api` on the same domain, which forwards the request to the operator. `/api` is not an open proxy: it only knows a fixed set of operators and validates the plate. Responses are cached at the edge for 60 seconds (vehicle data for a day) to go easy on the operators.
+The browser does all the lookups. Operators that allow cross-origin requests (ParkPay) are called directly. The rest go through `/api` on the same domain, which forwards the request to the operator. `/api` is not an open proxy: it only knows a fixed set of operators and validates the plate. Responses are cached at the edge for 60 seconds (vehicle data for a day) to go easy on the operators. Requests that don't look like they come from the page itself (missing the page's header, sent from another site, or from an obvious bot or scripting tool) get a plain 404, and each IP gets a soft limit of about six searches a minute. This keeps scanners and casual scripts away from the operators; it is not meant to stop a determined person.
 
 Optionally, `/api/svv/{PLATE}` looks up make, model, colour and year from the Norwegian Public Roads Administration (Statens vegvesen), shown as a confirmation card. This requires an API key from Statens vegvesen.
 

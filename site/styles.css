@@ -297,6 +297,8 @@ body {
 .local a { color: var(--text); font-weight: 600; }
 .nowrap { white-space: nowrap; }
 
+.notfound .btn { padding: 14px 24px; }
+
 /* About + footer */
 .about { padding: 4px 18px; margin-top: 8px; }
 .about summary { padding: 12px 0; font-weight: 600; cursor: pointer; }

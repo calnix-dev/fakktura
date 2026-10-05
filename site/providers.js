@@ -19,7 +19,7 @@ const PROVIDERS = [
     payUrl: (plate) => `https://autopay.io/oneTimePayment/${encodeURIComponent(plate)}`,
     // Same endpoint autopay.io's own "betal uten app" page uses.
     async check(plate, { proxy }) {
-      const data = await proxy(`autopay/${plate}`);
+      const data = await proxy("autopay", plate);
       return fromList(data.sessions);
     },
   },
@@ -29,7 +29,7 @@ const PROVIDERS = [
     hint: "Tidligere Europark og Q-Park",
     payUrl: () => "https://qpark-betaling.giantleap.no/",
     async check(plate, { proxy }) {
-      const data = await proxy(`aimo/${plate}`);
+      const data = await proxy("aimo", plate);
       if (data.resultCode && data.resultCode !== "SUCCESS") {
         throw new Error(data.errorMsg || data.resultCode);
       }
@@ -42,9 +42,9 @@ const PROVIDERS = [
     hint: "Apcoa-anlegg med kameragjenkjenning",
     payUrl: () => "https://flow.apcoa.no/transaction-list-search",
     async check(plate, { proxy }) {
-      // Worker maps Apcoa's "404 = nothing found" to an empty list.
-      const data = await proxy(`apcoa/${plate}`);
-      return fromList(Array.isArray(data) ? data : data.transactions);
+      // The function maps Apcoa's "nothing found" reply to an empty list.
+      const data = await proxy("apcoa", plate);
+      return fromList(data);
     },
   },
   {
@@ -64,7 +64,8 @@ const PROVIDERS = [
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      const locations = data.locations || [];
+      const locations = data.locations;
+      if (!Array.isArray(locations)) throw new Error("Uventet svar");
       // A location may bundle several parkings; flatten when it does.
       const items = locations.flatMap((loc) => {
         const nested = loc.parkings || loc.registrations;
@@ -86,7 +87,7 @@ const PROVIDERS = [
     // from their app config; the API allows cross-origin requests, so it is
     // called directly. It only returns parkings from the last 48 hours.
     async check(plate) {
-      const res = await fetch(`https://app-timepark-prd-consumer-api.azurewebsites.net/api/manualpayment/${plate}/1`, {
+      const res = await fetch(`https://app-timepark-prd-consumer-api.azurewebsites.net/api/manualpayment/${encodeURIComponent(plate)}/1`, {
         headers: { "tenant-id": "d7c30b1b-252b-4d86-a1a6-38f3dcfb99d8" },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -127,18 +128,22 @@ const LOCAL_PROVIDERS = [
 
 // Resolves to { hits: [{ provider, items }], failed: number }.
 async function checkLocal(plate, { proxy }) {
-  const data = await proxy(`others/${plate}`);
+  const data = await proxy("others", plate);
+  if (!data.hits || typeof data.hits !== "object" || !Array.isArray(data.failed)) throw new Error("Uventet svar");
   const hits = LOCAL_PROVIDERS.flatMap((provider) => {
     const raw = data.hits?.[provider.id];
     if (!Array.isArray(raw) || !raw.length) return [];
     const items = raw.map((r) => ({ ...normalizeSession(r), url: provider.sessionUrl?.(r) }));
     return [{ provider, items }];
   });
-  return { hits, failed: (data.failed || []).length };
+  return { hits, failed: data.failed.length };
 }
 
+// A missing or non-array list means the provider changed its API. That must
+// show as an error, never as "nothing found".
 function fromList(list) {
-  const items = (Array.isArray(list) ? list : []).map(normalizeSession);
+  if (!Array.isArray(list)) throw new Error("Uventet svar fra selskapet");
+  const items = list.map(normalizeSession);
   return items.length ? { status: "found", items } : { status: "clear" };
 }
 

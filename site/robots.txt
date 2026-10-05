@@ -1,0 +1,7 @@
+# The front page may be indexed. Lookups and result URLs (which contain a
+# licence plate) may not.
+User-agent: *
+Disallow: /api/
+Disallow: /*?plate=
+Disallow: /*&plate=
+Disallow: /*?demo=

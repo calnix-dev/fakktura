@@ -56,9 +56,12 @@ function withTimeout(promise, ms) {
 // Opened from disk (file://) there is no /api to talk to.
 const HAS_PROXY = Boolean(PROXY_URL) && location.protocol !== "file:";
 
-async function proxy(path) {
+async function proxy(route, plate) {
   if (!HAS_PROXY) throw Object.assign(new Error("Ingen proxy konfigurert"), { manual: true });
-  const res = await fetch(`${PROXY_URL.replace(/\/$/, "")}/${path}`, { headers: { Accept: "application/json" } });
+  const url = `${PROXY_URL.replace(/\/$/, "")}/${route}/${encodeURIComponent(plate)}`;
+  // X-Fakktura marks the request as coming from this page; /api rejects
+  // requests without it (see functions/api/[provider]/[plate].js).
+  const res = await fetch(url, { headers: { Accept: "application/json", "X-Fakktura": "1" } });
   if (res.status === 429) throw new Error("For mange søk – prøv igjen om litt");
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
@@ -109,8 +112,14 @@ async function demoLocal(plate) {
 
 // --- Rendering ------------------------------------------------------------
 
-const money = (n, cur = "NOK") =>
-  new Intl.NumberFormat("nb-NO", { style: "currency", currency: cur, maximumFractionDigits: 2 }).format(n);
+function money(n, cur = "NOK") {
+  try {
+    return new Intl.NumberFormat("nb-NO", { style: "currency", currency: cur, maximumFractionDigits: 2 }).format(n);
+  } catch {
+    // Unknown currency code from a provider (e.g. "kr"): show it as-is.
+    return `${n.toLocaleString("nb-NO", { maximumFractionDigits: 2 })} ${cur}`;
+  }
+}
 
 function when(start, end) {
   const d = (v) => {
@@ -195,12 +204,12 @@ function renderSummary({ found, sessions, errors, manual }, plate) {
   summary.hidden = false;
 }
 
-async function loadVehicle(plate) {
+async function loadVehicle(plate, isStale) {
   vehicle.hidden = true;
   if (!HAS_PROXY || DEMO) return;
   try {
-    const { vehicle: v } = await withTimeout(proxy(`svv/${plate}`), 6000);
-    if (!v) return;
+    const { vehicle: v } = await withTimeout(proxy("svv", plate), 6000);
+    if (!v || isStale()) return;
     vehicle.innerHTML = `<div><small>Kjøretøy</small><strong></strong></div><div class="meta"></div>`;
     vehicle.querySelector("strong").textContent = [v.make, v.model].filter(Boolean).join(" ");
     vehicle.querySelector(".meta").textContent = [v.color, v.year].filter(Boolean).join(" · ");
@@ -230,7 +239,13 @@ function renderManual(plate) {
 
 // --- Search ---------------------------------------------------------------
 
+// Each search gets an id; results from an older search that finish late are
+// dropped instead of landing in the newer search's list.
+let searchId = 0;
+
 async function search(plate) {
+  const id = ++searchId;
+  const isStale = () => id !== searchId;
   button.disabled = true;
   summary.hidden = true;
   results.replaceChildren();
@@ -241,12 +256,13 @@ async function search(plate) {
     history.replaceState(null, "", `?${new URLSearchParams({ ...(DEMO && { demo: params.get("demo") || "1" }), plate })}`);
   } catch { /* some browsers refuse URL changes on file:// */ }
 
-  loadVehicle(plate);
+  loadVehicle(plate, isStale);
 
   const tally = { found: 0, sessions: 0, errors: 0, manual: 0 };
   const ctx = { proxy };
 
   const showFound = (row, provider, items) => {
+    if (isStale()) return;
     tally.found++;
     tally.sessions += items.length;
     setRow(row, "found", `${items.length} ubetalt`);
@@ -267,12 +283,14 @@ async function search(plate) {
     }
     try {
       const { hits, failed } = await withTimeout(DEMO ? demoLocal(plate) : checkLocal(plate, ctx), TIMEOUT_MS);
+      if (isStale()) return;
       for (const { provider, items } of hits) {
         showFound(renderRow(provider, plate), provider, items);
       }
       local.textContent = `Også sjekket ${LOCAL_PROVIDERS.length} lokale selskaper: ${names}.`
         + (failed ? ` ${failed} svarte ikke.` : "");
     } catch {
+      if (isStale()) return;
       tally.errors++;
       local.textContent = `Fikk ikke sjekket lokale selskaper (${names}). Prøv igjen om litt.`;
     }
@@ -288,12 +306,14 @@ async function search(plate) {
 
     try {
       const res = await withTimeout(DEMO ? demoCheck(provider, plate) : provider.check(plate, ctx), TIMEOUT_MS);
+      if (isStale()) return;
       if (res.status === "found") {
         showFound(row, provider, res.items);
       } else {
         setRow(row, "clear", "Ingenting");
       }
     } catch (err) {
+      if (isStale()) return;
       if (err.manual) {
         tally.manual++;
         setRow(row, "manual", "Sjekk manuelt");
@@ -306,6 +326,7 @@ async function search(plate) {
     }
   })]);
 
+  if (isStale()) return;
   renderSummary(tally, plate);
   button.disabled = false;
 }

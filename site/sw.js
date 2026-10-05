@@ -40,7 +40,7 @@ self.addEventListener("fetch", (event) => {
         const copy = res.clone();
         // Store pages under "./" so any ?plate=… URL can fall back to the shell.
         const key = request.mode === "navigate" ? "./" : request;
-        caches.open(CACHE).then((c) => c.put(key, copy));
+        event.waitUntil(caches.open(CACHE).then((c) => c.put(key, copy)));
       }
       return res;
     } catch (err) {
