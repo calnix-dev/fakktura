@@ -7,11 +7,14 @@ const results = $("#results");
 const summary = $("#summary");
 const vehicle = $("#vehicle");
 const recent = $("#recent");
+const local = $("#local");
 const rowTemplate = $("#row");
 
 const params = new URLSearchParams(location.search);
 // ?demo=1 fakes provider answers so the UI can be tried without a proxy.
+// ?demo=many shows a fixed case with hits at several providers.
 const DEMO = params.has("demo");
+const DEMO_MANY = params.get("demo") === "many";
 const TIMEOUT_MS = 15000;
 const RECENT_KEY = "fakktura:recent";
 
@@ -60,24 +63,47 @@ async function proxy(path) {
   return res.json();
 }
 
+const hoursAgo = (h) => new Date(Date.now() - h * 3600e3).toISOString();
+const demoSession = (title, startH, durationH, amount) => ({
+  title,
+  start: hoursAgo(startH),
+  end: hoursAgo(startH - durationH),
+  amount,
+  currency: "NOK",
+});
+
+// Fixed hits for ?demo=many, keyed by provider id.
+const DEMO_MANY_HITS = {
+  autopay: [
+    demoSession("Storsenteret P-hus", 30, 2.5, 87),
+    demoSession("Jernbanetorget P", 6, 1, 49),
+  ],
+  apcoa: [demoSession("Sykehuset parkering", 20, 4, 156)],
+  "gl-bergen": [demoSession("Bygarasjen", 40, 3, 120)],
+};
+
 function demoCheck(provider, plate) {
   // Deterministic per plate+provider so repeat searches look consistent.
   const seed = [...(plate + provider.id)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
   const delay = 400 + (seed % 1200);
   return new Promise((resolve) => setTimeout(() => {
+    if (DEMO_MANY) {
+      const items = DEMO_MANY_HITS[provider.id];
+      return resolve(items ? { status: "found", items } : { status: "clear" });
+    }
     if (seed % 5 !== 0) return resolve({ status: "clear" });
-    const start = new Date(Date.now() - 26 * 3600e3);
-    resolve({
-      status: "found",
-      items: [{
-        title: "Storgata 12 – P-hus",
-        start: start.toISOString(),
-        end: new Date(start.getTime() + 2.5 * 3600e3).toISOString(),
-        amount: 87,
-        currency: "NOK",
-      }],
-    });
+    resolve({ status: "found", items: [demoSession("Storgata 12 – P-hus", 26, 2.5, 87)] });
   }, delay));
+}
+
+async function demoLocal(plate) {
+  const results = await Promise.all(LOCAL_PROVIDERS.map(async (provider) => {
+    // Outside ?demo=many, only let Vestpark (last) produce a hit.
+    if (!DEMO_MANY && provider !== LOCAL_PROVIDERS.at(-1)) return null;
+    const res = await demoCheck(provider, plate);
+    return res.status === "found" ? { provider, items: res.items } : null;
+  }));
+  return { hits: results.filter(Boolean), failed: 0 };
 }
 
 // --- Rendering ------------------------------------------------------------
@@ -112,8 +138,9 @@ function renderRow(provider, plate) {
   return row;
 }
 
-function showAction(row, text, danger = false) {
+function showAction(row, text, danger = false, href) {
   const action = row.querySelector(".row__action");
+  if (href) action.href = href;
   action.textContent = `${text} ↗`;
   action.classList.toggle("btn--danger", danger);
   action.hidden = false;
@@ -184,9 +211,10 @@ async function search(plate) {
   button.disabled = true;
   summary.hidden = true;
   results.replaceChildren();
+  local.hidden = true;
   rememberPlate(plate);
   try {
-    history.replaceState(null, "", `?${new URLSearchParams({ ...(DEMO && { demo: 1 }), plate })}`);
+    history.replaceState(null, "", `?${new URLSearchParams({ ...(DEMO && { demo: params.get("demo") || "1" }), plate })}`);
   } catch { /* some browsers refuse URL changes on file:// */ }
 
   loadVehicle(plate);
@@ -194,7 +222,40 @@ async function search(plate) {
   const tally = { found: 0, sessions: 0, errors: 0, manual: 0 };
   const ctx = { proxy };
 
-  await Promise.all(PROVIDERS.map(async (provider, i) => {
+  const showFound = (row, provider, items) => {
+    tally.found++;
+    tally.sessions += items.length;
+    setRow(row, "found", `${items.length} ubetalt`);
+    renderFound(row, items);
+    // Link straight to the session when the provider gives us one.
+    const direct = items.length === 1 ? items[0].url : undefined;
+    showAction(row, `Betal hos ${provider.name.split(" /")[0]}`, true, direct);
+    results.prepend(row); // surface hits at the top
+  };
+
+  // Smaller operators: one batched call, and only hits get a row.
+  const localTask = (async () => {
+    const names = LOCAL_PROVIDERS.map((p) => p.name).join(", ");
+    if (!HAS_PROXY && !DEMO) {
+      local.textContent = `${LOCAL_PROVIDERS.length} lokale selskaper kan ikke sjekkes uten /api.`;
+      local.hidden = false;
+      return;
+    }
+    try {
+      const { hits, failed } = await withTimeout(DEMO ? demoLocal(plate) : checkLocal(plate, ctx), TIMEOUT_MS);
+      for (const { provider, items } of hits) {
+        showFound(renderRow(provider, plate), provider, items);
+      }
+      local.textContent = `Også sjekket ${LOCAL_PROVIDERS.length} lokale selskaper: ${names}.`
+        + (failed ? ` ${failed} svarte ikke.` : "");
+    } catch {
+      tally.errors++;
+      local.textContent = `Fikk ikke sjekket lokale selskaper (${names}). Prøv igjen om litt.`;
+    }
+    local.hidden = false;
+  })();
+
+  await Promise.all([localTask, ...PROVIDERS.map(async (provider, i) => {
     const row = renderRow(provider, plate);
     row.style.animationDelay = `${i * 40}ms`;
     results.append(row);
@@ -209,12 +270,7 @@ async function search(plate) {
     try {
       const res = await withTimeout(DEMO ? demoCheck(provider, plate) : provider.check(plate, ctx), TIMEOUT_MS);
       if (res.status === "found") {
-        tally.found++;
-        tally.sessions += res.items.length;
-        setRow(row, "found", `${res.items.length} ubetalt`);
-        renderFound(row, res.items);
-        showAction(row, `Betal hos ${provider.name.split(" /")[0]}`, true);
-        results.prepend(row); // surface hits at the top
+        showFound(row, provider, res.items);
       } else {
         setRow(row, "clear", "Ingenting");
       }
@@ -229,7 +285,7 @@ async function search(plate) {
       }
       showAction(row, "Sjekk selv");
     }
-  }));
+  })]);
 
   renderSummary(tally, plate);
   button.disabled = false;

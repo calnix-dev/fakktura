@@ -18,6 +18,10 @@ The site itself is in Norwegian.
 | ParkPay / PassPay | Live lookup, straight from the browser | No |
 | TimePark | Link only (lookups require picking a location) | – |
 | Parkly | Link only (lookups require picking a location) | – |
+| Municipal "Pay at home" sites: Asker, Bærum, Bergen, Fredrikstad, Hamar, Kristiansand, Lillestrøm, Molde, Porsgrunn, Trondheim | Live lookup, shown only on a hit | Yes (batched) |
+| Vestpark (UNUM) | Live lookup, shown only on a hit | Yes (batched) |
+
+The smaller operators at the bottom are checked in a single batched call (`/api/others/{PLATE}`) that queries them all in parallel on the server, and they only get a row in the results when something is found. A full search therefore costs five function calls regardless of how many smaller operators are added. Most of the municipal sites run on Giantleap, the same system as Aimo/Q-Park, so adding another one is usually just a new tenant URL.
 
 Lookups use the same public endpoints as each operator's own "pay without the app" page. They are undocumented and may change without notice. ParkPay's Norwegian portal (`betaling.parkpay.no`) runs on a Danish vendor's backend (Logos), hence the API host `parkpayapi.logos.dk`; it is only queried for Norwegian plates (`countryCode: "NO"`).
 
@@ -41,7 +45,8 @@ Optionally, `/api/svv/{PLATE}` looks up make, model, colour and year from the No
 
 ```sh
 npx wrangler pages dev            # http://localhost:8788, including /api
-# http://localhost:8788/?demo=1   fake results, for trying the UI
+# http://localhost:8788/?demo=1     fake results, for trying the UI
+# http://localhost:8788/?demo=many  fake hits at several operators
 ```
 
 Wrangler reads secrets such as `SVV_API_KEY` from `.dev.vars` or `.env` (both git-ignored). You can also open `site/index.html` directly from disk, but operators behind `/api` will then show as "check manually".
@@ -72,7 +77,7 @@ The site is now live at `https://<project>.pages.dev`, and every push deploys au
 
 ## Costs
 
-Cloudflare Pages' free plan covers this comfortably: static requests are unlimited, and Pages Functions get 100,000 requests a day (each search uses about four). Going over the limit doesn't incur charges on the free plan; `/api` simply fails until the next day, and the site falls back to manual links.
+Cloudflare Pages' free plan covers this comfortably: static requests are unlimited, and Pages Functions get 100,000 requests a day (each search uses five, so roughly 20,000 searches a day). Going over the limit doesn't incur charges on the free plan; `/api` simply fails until the next day, and the site falls back to manual links.
 
 ## Privacy
 

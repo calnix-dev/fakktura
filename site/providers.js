@@ -9,7 +9,7 @@
 // Only Norwegian portals are linked. Where a Norwegian portal runs on a
 // foreign backend (ParkPay → logos.dk), that is noted next to the endpoint.
 
-/** @typedef {{ title?: string, start?: string, end?: string, amount?: number, currency?: string }} Session */
+/** @typedef {{ title?: string, start?: string, end?: string, amount?: number, currency?: string, url?: string }} Session */
 
 const PROVIDERS = [
   {
@@ -88,6 +88,45 @@ const PROVIDERS = [
     payUrl: () => "https://pay.parkly.no/",
   },
 ];
+
+// Smaller operators: checked in one batched call to /api/others, and only
+// shown in the results when they actually find something. Most are
+// municipal "Pay at home" sites on Giantleap (the same system as Aimo).
+const payAtHome = (tenant) => () => `https://${tenant}-payathome.giantleap.net/`;
+const LOCAL_PROVIDERS = [
+  { id: "gl-asker", name: "Asker", hint: "Pay at home", payUrl: payAtHome("asker") },
+  { id: "gl-baerum", name: "Bærum", hint: "Pay at home", payUrl: payAtHome("baerum") },
+  { id: "gl-bergen", name: "Bergen", hint: "Pay at home", payUrl: payAtHome("bergen") },
+  { id: "gl-fredrikstad", name: "Fredrikstad", hint: "Pay at home", payUrl: payAtHome("fredrikstad") },
+  { id: "gl-hamar", name: "Hamar", hint: "Pay at home", payUrl: payAtHome("hamar") },
+  { id: "gl-kristiansand", name: "Kristiansand", hint: "Pay at home", payUrl: payAtHome("kristiansand") },
+  { id: "gl-lillestrom", name: "Lillestrøm", hint: "Pay at home", payUrl: payAtHome("lillestrom") },
+  { id: "gl-molde", name: "Molde", hint: "Pay at home", payUrl: payAtHome("molde") },
+  { id: "gl-porsgrunn", name: "Porsgrunn", hint: "Pay at home", payUrl: payAtHome("porsgrunn") },
+  { id: "gl-trondheim", name: "Trondheim Parkering", hint: "Smarte P-anlegg", payUrl: () => "https://smarte-p-anlegg.trondheimparkering.no/" },
+  {
+    id: "vestpark",
+    name: "Vestpark",
+    hint: "UNUM-anlegg",
+    payUrl: () => "https://unum.vestpark.no/",
+    // UNUM returns { id, hash } per session; its own page links straight to it.
+    sessionUrl: (raw) => raw.id != null && raw.hash
+      ? `https://unum.vestpark.no/UserParking/SelectPaymentOption?id=${encodeURIComponent(raw.id)}&hash=${encodeURIComponent(raw.hash)}`
+      : undefined,
+  },
+];
+
+// Resolves to { hits: [{ provider, items }], failed: number }.
+async function checkLocal(plate, { proxy }) {
+  const data = await proxy(`others/${plate}`);
+  const hits = LOCAL_PROVIDERS.flatMap((provider) => {
+    const raw = data.hits?.[provider.id];
+    if (!Array.isArray(raw) || !raw.length) return [];
+    const items = raw.map((r) => ({ ...normalizeSession(r), url: provider.sessionUrl?.(r) }));
+    return [{ provider, items }];
+  });
+  return { hits, failed: (data.failed || []).length };
+}
 
 function fromList(list) {
   const items = (Array.isArray(list) ? list : []).map(normalizeSession);

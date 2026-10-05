@@ -274,6 +274,8 @@ body {
   animation: spin .7s linear infinite;
 }
 
+.local { margin: -4px 4px 0; color: var(--muted); font-size: .8rem; }
+
 /* About + footer */
 .about { padding: 4px 18px; margin-top: 8px; }
 .about summary { padding: 12px 0; font-weight: 600; cursor: pointer; }
