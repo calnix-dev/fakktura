@@ -77,15 +77,24 @@ const PROVIDERS = [
   },
   {
     id: "timepark",
-    name: "TimePark",
-    hint: "Krever oppslag per parkeringsplass",
-    payUrl: () => "https://pay.timepark.no/",
-  },
-  {
-    id: "parkly",
-    name: "Parkly",
-    hint: "Krever oppslag per parkeringsplass",
-    payUrl: () => "https://pay.parkly.no/",
+    name: "TimePark / Parkly",
+    hint: "pay.timepark.no og pay.parkly.no",
+    // Both portals run the same app and search the same operator, and both
+    // pre-fill the search from ?licensePlate=.
+    payUrl: (plate) => `https://pay.timepark.no/?licensePlate=${encodeURIComponent(plate)}`,
+    // The portals' own "søk på skilt" flow. The tenant id is the public value
+    // from their app config; the API allows cross-origin requests, so it is
+    // called directly. It only returns parkings from the last 48 hours.
+    async check(plate) {
+      const res = await fetch(`https://app-timepark-prd-consumer-api.azurewebsites.net/api/manualpayment/${plate}/1`, {
+        headers: { "tenant-id": "d7c30b1b-252b-4d86-a1a6-38f3dcfb99d8" },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.orderExists) return fromList(data.data);
+      if (data.error?.errorCode === "PARKING_NOT_FOUND") return { status: "clear" };
+      throw new Error(data.error?.errorTitle || "Ukjent svar");
+    },
   },
 ];
 
@@ -147,7 +156,7 @@ const pick = (obj, keys) => {
 function normalizeSession(raw) {
   if (!raw || typeof raw !== "object") return {};
   let amount = pick(raw, [
-    "amount", "totalAmount", "price", "totalPrice", "sum", "total",
+    "amount", "amountInclusiveVat", "totalAmount", "price", "totalPrice", "sum", "total",
     "amountToPay", "amountIncVat", "fee", "price.amount", "cost",
   ]);
   if (typeof amount === "object") amount = pick(amount, ["amount", "value"]);
@@ -161,8 +170,8 @@ function normalizeSession(raw) {
       "locationName", "zoneName", "facilityName", "parkingLotName", "areaName",
       "siteName", "name", "operatorName", "location.name", "facility.name", "zone.name", "address",
     ]),
-    start: pick(raw, ["startTime", "start", "entryTime", "entryDate", "arrivalTime", "startDate", "from", "checkIn"]),
-    end: pick(raw, ["endTime", "end", "exitTime", "exitDate", "departureTime", "endDate", "to", "checkOut"]),
+    start: pick(raw, ["startTime", "start", "entranceDateTime", "entryTime", "entryDate", "arrivalTime", "startDate", "from", "checkIn"]),
+    end: pick(raw, ["endTime", "end", "exitDateTime", "exitTime", "exitDate", "departureTime", "endDate", "to", "checkOut"]),
     amount: Number.isFinite(amount) ? amount : undefined,
     currency: pick(raw, ["currency", "currencyCode", "price.currency"]) || "NOK",
   };

@@ -16,8 +16,7 @@ The site itself is in Norwegian.
 | Aimo Park / Q-Park | Live lookup | Yes |
 | Apcoa Flow | Live lookup | Yes |
 | ParkPay / PassPay | Live lookup, straight from the browser | No |
-| TimePark | Link only (lookups require picking a location) | – |
-| Parkly | Link only (lookups require picking a location) | – |
+| TimePark / Parkly | Live lookup, straight from the browser (one search covers both portals) | No |
 | Municipal "Pay at home" sites: Asker, Bærum, Bergen, Fredrikstad, Hamar, Kristiansand, Lillestrøm, Molde, Porsgrunn, Trondheim | Live lookup, shown only on a hit | Yes (batched) |
 | Vestpark (UNUM) | Live lookup, shown only on a hit | Yes (batched) |
 
@@ -32,8 +31,9 @@ To add an operator, add an entry to [`site/providers.js`](site/providers.js) and
 Hosted for free on [Cloudflare Pages](https://pages.cloudflare.com/).
 
 ```
-site/                                 Static site, no build step
+site/                                 Static site, no build step (installable as an app)
 functions/api/[provider]/[plate].js   Pages Function: GET /api/{provider}/{PLATE}
+functions/index.js                    Makes link-preview URLs absolute on "/"
 wrangler.toml                         Pages configuration
 ```
 
@@ -79,8 +79,16 @@ The site is now live at `https://<project>.pages.dev`, and every push deploys au
 
 Cloudflare Pages' free plan covers this comfortably: static requests are unlimited, and Pages Functions get 100,000 requests a day (each search uses five, so roughly 20,000 searches a day). Going over the limit doesn't incur charges on the free plan; `/api` simply fails until the next day, and the site falls back to manual links.
 
+**3. Web Analytics (optional)**
+
+In the Pages project: *Metrics* → *Web Analytics* → *Enable*. Cloudflare injects its cookieless analytics script on the next deployment; the content security policy in `site/_headers` already allows it.
+
 ## Privacy
 
-Plates are only sent to the parking operators (and Statens vegvesen, if enabled), via the site's own `/api`. Nothing is stored or logged by the site. Recent searches are remembered only in your own browser.
+Plates are only sent to the parking operators (and Statens vegvesen, if enabled), via the site's own `/api`. Nothing is stored or logged by the site. Recent searches are remembered only in your own browser. Fonts are self-hosted, so no requests go to Google. If Web Analytics is enabled, Cloudflare counts page views without cookies.
 
 Not affiliated with any of the parking operators.
+
+## License
+
+[MIT](LICENSE). The bundled fonts, Inter and JetBrains Mono, are under the SIL Open Font License; see `site/fonts/`.

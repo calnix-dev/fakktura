@@ -1,3 +1,19 @@
+/* Self-hosted fonts (SIL OFL, see fonts/*-LICENSE.txt). Latin subset only. */
+@font-face {
+  font-family: Inter;
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url(fonts/inter-latin.woff2) format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(fonts/jetbrains-mono-700-latin.woff2) format("woff2");
+}
+
 :root {
   --bg: #f4f5f8;
   --surface: #ffffff;
@@ -149,7 +165,10 @@ body {
   border-radius: 12px;
   background: var(--surface);
   color: var(--text);
-  font: 600 .9rem/1 inherit;
+  font: inherit;
+  font-size: .9rem;
+  font-weight: 600;
+  line-height: 1;
   text-decoration: none;
   cursor: pointer;
   transition: transform .1s, background .15s, opacity .15s;
@@ -275,6 +294,8 @@ body {
 }
 
 .local { margin: -4px 4px 0; color: var(--muted); font-size: .8rem; }
+.local a { color: var(--text); font-weight: 600; }
+.nowrap { white-space: nowrap; }
 
 /* About + footer */
 .about { padding: 4px 18px; margin-top: 8px; }

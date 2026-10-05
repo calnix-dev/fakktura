@@ -8,6 +8,7 @@ const summary = $("#summary");
 const vehicle = $("#vehicle");
 const recent = $("#recent");
 const local = $("#local");
+const manualNote = $("#manual");
 const rowTemplate = $("#row");
 
 const params = new URLSearchParams(location.search);
@@ -180,13 +181,17 @@ function renderSummary({ found, sessions, errors, manual }, plate) {
     tone = "ok";
     icon = "✓";
     title = "Ingen ubetalte parkeringer funnet";
-    text = manual ? `${manual} selskap${manual === 1 ? "" : "er"} må sjekkes manuelt, se under.` : "Du kan senke skuldrene.";
+    text = manual ? `${manual} selskap${manual === 1 ? "" : "er"} må sjekkes manuelt, se under listen.` : "Du kan senke skuldrene.";
   }
   summary.dataset.tone = tone;
   summary.innerHTML = `<span class="summary__icon" aria-hidden="true"></span><div><h2></h2><p></p></div>`;
   summary.querySelector(".summary__icon").textContent = icon;
   summary.querySelector("h2").textContent = title;
-  summary.querySelector("p").textContent = `${text} ${formatPlate(plate)} · kl. ${time}`;
+  const p = summary.querySelector("p");
+  const stamp = document.createElement("span");
+  stamp.className = "nowrap";
+  stamp.textContent = `${formatPlate(plate)} · kl. ${time}`;
+  p.replaceChildren(`${text} `, stamp);
   summary.hidden = false;
 }
 
@@ -205,6 +210,24 @@ async function loadVehicle(plate) {
   }
 }
 
+// Providers we can't query get one compact line of links instead of rows.
+function renderManual(plate) {
+  const links = PROVIDERS.filter((p) => !p.check).map((p) => {
+    const a = document.createElement("a");
+    a.href = p.payUrl(plate);
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.textContent = `${p.name} ↗`;
+    return a;
+  });
+  if (!links.length) return;
+  const parts = ["Sjekk også manuelt: "];
+  links.forEach((a, i) => parts.push(...(i ? [" · ", a] : [a])));
+  parts.push(" (krever valg av parkeringsplass)");
+  manualNote.replaceChildren(...parts);
+  manualNote.hidden = false;
+}
+
 // --- Search ---------------------------------------------------------------
 
 async function search(plate) {
@@ -213,6 +236,7 @@ async function search(plate) {
   results.replaceChildren();
   local.hidden = true;
   rememberPlate(plate);
+  renderManual(plate);
   try {
     history.replaceState(null, "", `?${new URLSearchParams({ ...(DEMO && { demo: params.get("demo") || "1" }), plate })}`);
   } catch { /* some browsers refuse URL changes on file:// */ }
@@ -255,17 +279,12 @@ async function search(plate) {
     local.hidden = false;
   })();
 
-  await Promise.all([localTask, ...PROVIDERS.map(async (provider, i) => {
+  tally.manual = PROVIDERS.filter((p) => !p.check).length;
+
+  await Promise.all([localTask, ...PROVIDERS.filter((p) => p.check).map(async (provider, i) => {
     const row = renderRow(provider, plate);
     row.style.animationDelay = `${i * 40}ms`;
     results.append(row);
-
-    if (!provider.check) {
-      tally.manual++;
-      setRow(row, "manual", "Sjekk manuelt");
-      showAction(row, "Åpne betalingsside");
-      return;
-    }
 
     try {
       const res = await withTimeout(DEMO ? demoCheck(provider, plate) : provider.check(plate, ctx), TIMEOUT_MS);
@@ -350,4 +369,9 @@ if (initial) {
   form.requestSubmit();
 } else {
   input.focus();
+}
+
+// Service worker: lets the app be installed and open offline. Not on file://.
+if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+  navigator.serviceWorker.register("sw.js").catch(() => { /* not critical */ });
 }

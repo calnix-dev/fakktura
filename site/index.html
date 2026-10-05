@@ -5,11 +5,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Fakktura – sjekk ubetalt parkering</title>
   <meta name="description" content="Slå opp bilskiltet ditt hos norske parkeringsselskaper og betal før fakturagebyret kommer.">
-  <meta name="theme-color" content="#0f172a">
+  <meta name="theme-color" content="#0b1020">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet">
+  <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="apple-mobile-web-app-title" content="fakktura">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+  <!-- Link previews. og:url/og:image are made absolute on the server
+       (functions/index.js), since some apps require full URLs. -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="fakktura">
+  <meta property="og:locale" content="nb_NO">
+  <meta property="og:title" content="fakktura – sjekk ubetalt parkering">
+  <meta property="og:description" content="Sjekk skiltet hos norske parkeringsselskaper – før fakturagebyret kommer.">
+  <meta property="og:url" content="/">
+  <meta property="og:image" content="/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="fakktura: sjekk skiltet før fakturagebyret kommer">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <link rel="preload" href="fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="styles.css">
   <!-- Plain (non-module) scripts so the page also works when opened from disk (file://). -->
   <script defer src="config.js"></script>
@@ -40,6 +59,7 @@
     <section id="summary" class="summary" hidden aria-live="polite"></section>
 
     <ul id="results" class="results" aria-label="Parkeringsselskaper"></ul>
+    <p id="manual" class="local" hidden></p>
     <p id="local" class="local" hidden></p>
 
     <section class="about">
