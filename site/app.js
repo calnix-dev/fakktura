@@ -83,6 +83,11 @@ const DEMO_MANY_HITS = {
     demoSession("Jernbanetorget P", 6, 1, 49),
   ],
   apcoa: [demoSession("Sykehuset parkering", 20, 4, 156)],
+  // TimePark has a 48-hour deadline: one fresh, one about to run out.
+  timepark: [
+    demoSession("Kjøpesenteret P-hus", 3, 1, 38),
+    demoSession("Stasjonen P-plass", 46, 1.5, 64.5),
+  ],
   "gl-bergen": [demoSession("Bygarasjen", 40, 3, 120)],
 };
 
@@ -113,26 +118,55 @@ async function demoLocal(plate) {
 // --- Rendering ------------------------------------------------------------
 
 function money(n, cur = "NOK") {
+  // "38 kr", but "38,50 kr".
+  const minimumFractionDigits = Number.isInteger(n) ? 0 : 2;
   try {
-    return new Intl.NumberFormat("nb-NO", { style: "currency", currency: cur, maximumFractionDigits: 2 }).format(n);
+    return new Intl.NumberFormat("nb-NO", { style: "currency", currency: cur, minimumFractionDigits, maximumFractionDigits: 2 }).format(n);
   } catch {
     // Unknown currency code from a provider (e.g. "kr"): show it as-is.
     return `${n.toLocaleString("nb-NO", { maximumFractionDigits: 2 })} ${cur}`;
   }
 }
 
-function when(start, end) {
-  const d = (v) => {
-    const date = new Date(v);
-    return isNaN(date) ? null : date;
-  };
-  const s = start && d(start);
-  const e = end && d(end);
-  if (!s) return "";
-  const day = s.toLocaleDateString("nb-NO", { weekday: "short", day: "numeric", month: "short" });
-  const t = (x) => x.toLocaleTimeString("nb-NO", { hour: "2-digit", minute: "2-digit" });
-  return e ? `${day} ${t(s)}–${t(e)}` : `${day} kl. ${t(s)}`;
+const toDate = (v) => {
+  if (!v) return null;
+  const date = new Date(v);
+  return isNaN(date) ? null : date;
+};
+const midnight = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const RELATIVE_DAYS = new Map([[-1, "i går"], [0, "i dag"], [1, "i morgen"]]);
+// "i går", "i dag" or "i morgen" when close, else "fre. 20. nov.".
+function fmtDay(d) {
+  const diff = Math.round((midnight(d) - midnight(new Date())) / 86_400_000);
+  return RELATIVE_DAYS.get(diff) ?? d.toLocaleDateString("nb-NO", { weekday: "short", day: "numeric", month: "short" });
 }
+const fmtTime = (d) => d.toLocaleTimeString("nb-NO", { hour: "2-digit", minute: "2-digit" });
+
+// "i dag 18:38–19:31", with both days when the parking spans midnight.
+function when(start, end) {
+  const s = toDate(start);
+  const e = toDate(end);
+  if (!s) return "";
+  if (!e) return `${fmtDay(s)} kl. ${fmtTime(s)}`;
+  return midnight(s).getTime() === midnight(e).getTime()
+    ? `${fmtDay(s)} ${fmtTime(s)}–${fmtTime(e)}`
+    : `${fmtDay(s)} ${fmtTime(s)} – ${fmtDay(e)} ${fmtTime(e)}`;
+}
+
+// When to pay by, counted from leaving: { at: "fre. 20. nov. kl. 19:31",
+// left: "44 timer igjen" }, or { at, expired: true } once it has passed.
+function deadline(item, hours) {
+  const from = toDate(item.end) || toDate(item.start);
+  if (!hours || !from) return null;
+  const due = new Date(from.getTime() + hours * 3_600_000);
+  const at = `${fmtDay(due)} kl. ${fmtTime(due)}`;
+  const ms = due - Date.now();
+  if (ms <= 0) return { at, expired: true };
+  const h = Math.floor(ms / 3_600_000);
+  return { at, left: h ? `${h} ${h === 1 ? "time" : "timer"} igjen` : `${Math.ceil(ms / 60_000)} min igjen` };
+}
+
+const el = (tag, className, text = "") => Object.assign(document.createElement(tag), { className, textContent: text });
 
 function setRow(row, state, label) {
   row.dataset.state = state;
@@ -156,18 +190,25 @@ function showAction(row, text, danger = false, href) {
   action.hidden = false;
 }
 
-function renderFound(row, items) {
+// One box per session: place and amount on top, then when it was parked and
+// when to pay by, each labelled so the times can't be mixed up.
+function renderFound(row, items, payWithinHours) {
   const list = row.querySelector(".row__items");
   list.replaceChildren(...items.map((it) => {
     const li = document.createElement("li");
-    const left = document.createElement("span");
-    left.textContent = [it.title, when(it.start, it.end)].filter(Boolean).join(" · ") || "Ubetalt parkering";
-    li.append(left);
-    if (it.amount != null) {
-      const b = document.createElement("b");
-      b.textContent = money(it.amount, it.currency);
-      li.append(b);
+    li.append(el("strong", "item__title", it.title || "Ubetalt parkering"));
+    if (it.amount != null) li.append(el("b", "item__amount", money(it.amount, it.currency)));
+
+    const facts = el("dl", "item__facts");
+    const parked = when(it.start, it.end);
+    if (parked) facts.append(el("dt", "", "Parkert"), el("dd", "", parked));
+    const due = deadline(it, payWithinHours);
+    if (due) {
+      const dd = el("dd", "item__due", due.expired ? `gikk ut ${due.at}` : due.at);
+      if (due.left) dd.append(" ", el("span", "item__left", due.left));
+      facts.append(el("dt", "", "Frist"), dd);
     }
+    if (facts.childElementCount) li.append(facts);
     return li;
   }));
   list.hidden = false;
@@ -180,7 +221,7 @@ function renderSummary({ found, sessions, errors, manual }, plate) {
     tone = "bad";
     icon = "!";
     title = `${sessions} ubetalt${sessions === 1 ? "" : "e"} parkering${sessions === 1 ? "" : "er"} funnet`;
-    text = `Hos ${found} selskap${found === 1 ? "" : "er"}. Betal før fristen for å unngå fakturagebyr.`;
+    text = `${found > 1 ? `Hos ${found} selskaper. ` : ""}Betal før fristen for å unngå fakturagebyr.`;
   } else if (errors) {
     tone = "warn";
     icon = "?";
@@ -193,14 +234,12 @@ function renderSummary({ found, sessions, errors, manual }, plate) {
     text = manual ? `${manual} selskap${manual === 1 ? "" : "er"} må sjekkes manuelt, se under listen.` : "Du kan senke skuldrene.";
   }
   summary.dataset.tone = tone;
-  summary.innerHTML = `<span class="summary__icon" aria-hidden="true"></span><div><h2></h2><p></p></div>`;
+  summary.innerHTML = `<span class="summary__icon" aria-hidden="true"></span><div><h2></h2><p></p><p class="summary__stamp"></p></div>`;
   summary.querySelector(".summary__icon").textContent = icon;
   summary.querySelector("h2").textContent = title;
-  const p = summary.querySelector("p");
-  const stamp = document.createElement("span");
-  stamp.className = "nowrap";
-  stamp.textContent = `${formatPlate(plate)} · kl. ${time}`;
-  p.replaceChildren(`${text} `, stamp);
+  summary.querySelector("p").textContent = text;
+  // When the lookup ran, so it isn't mistaken for a parking time.
+  summary.querySelector(".summary__stamp").textContent = `Sjekket ${formatPlate(plate)} kl. ${time}`;
   summary.hidden = false;
 }
 
@@ -266,7 +305,7 @@ async function search(plate) {
     tally.found++;
     tally.sessions += items.length;
     setRow(row, "found", `${items.length} ubetalt`);
-    renderFound(row, items);
+    renderFound(row, items, provider.payWithinHours);
     // Link straight to the session when the provider gives us one.
     const direct = items.length === 1 ? items[0].url : undefined;
     showAction(row, `Betal hos ${provider.name.split(" /")[0]}`, true, direct);
@@ -287,8 +326,13 @@ async function search(plate) {
       for (const { provider, items } of hits) {
         showFound(renderRow(provider, plate), provider, items);
       }
-      local.textContent = `Også sjekket ${LOCAL_PROVIDERS.length} lokale selskaper: ${names}.`
-        + (failed ? ` ${failed} svarte ikke.` : "");
+      // The names are only there for those who want them.
+      const more = el("details");
+      more.append(
+        el("summary", "", `Også sjekket ${LOCAL_PROVIDERS.length} lokale selskaper` + (failed ? ` (${failed} svarte ikke)` : "")),
+        `${names}.`,
+      );
+      local.replaceChildren(more);
     } catch {
       if (isStale()) return;
       tally.errors++;
@@ -350,11 +394,12 @@ form.addEventListener("submit", (e) => {
 function rememberPlate(plate) {
   const list = [plate, ...store.get(RECENT_KEY, []).filter((p) => p !== plate)].slice(0, 4);
   store.set(RECENT_KEY, list);
-  renderRecent();
+  renderRecent(plate);
 }
 
-function renderRecent() {
-  recent.replaceChildren(...store.get(RECENT_KEY, []).map((p) => {
+// The plate on screen is left out; it's already in the search field.
+function renderRecent(current) {
+  recent.replaceChildren(...store.get(RECENT_KEY, []).filter((p) => p !== current).map((p) => {
     const li = document.createElement("li");
     const b = document.createElement("button");
     b.type = "button";

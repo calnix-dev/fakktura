@@ -10,6 +10,8 @@
 // foreign backend (ParkPay → logos.dk), that is noted next to the endpoint.
 
 /** @typedef {{ title?: string, start?: string, end?: string, amount?: number, currency?: string, url?: string }} Session */
+// A provider may set `payWithinHours`: how long after leaving you can pay
+// before an invoice is sent. The UI then shows the deadline for each hit.
 
 const PROVIDERS = [
   {
@@ -83,6 +85,8 @@ const PROVIDERS = [
     // Both portals run the same app and search the same operator, and both
     // pre-fill the search from ?licensePlate=.
     payUrl: (plate) => `https://pay.timepark.no/?licensePlate=${encodeURIComponent(plate)}`,
+    // Pay within 48 hours of leaving, or an invoice with a fee is sent.
+    payWithinHours: 48,
     // The portals' own "søk på skilt" flow. The tenant id is the public value
     // from their app config; the API allows cross-origin requests, so it is
     // called directly. It only returns parkings from the last 48 hours.
@@ -175,8 +179,11 @@ function normalizeSession(raw) {
       "locationName", "zoneName", "facilityName", "parkingLotName", "areaName",
       "siteName", "name", "operatorName", "location.name", "facility.name", "zone.name", "address",
     ]),
-    start: pick(raw, ["startTime", "start", "entranceDateTime", "entryTime", "entryDate", "arrivalTime", "startDate", "from", "checkIn"]),
-    end: pick(raw, ["endTime", "end", "exitDateTime", "exitTime", "exitDate", "departureTime", "endDate", "to", "checkOut"]),
+    // TimePark sends both ISO (entranceTime/exitingTime) and Norwegian
+    // "dd.mm.yyyy" (entranceDateTime/exitDateTime). Date() can't read the
+    // latter and swaps day and month when the day is 1–12, so ISO goes first.
+    start: pick(raw, ["startTime", "start", "entranceTime", "entranceDateTime", "entryTime", "entryDate", "arrivalTime", "startDate", "from", "checkIn"]),
+    end: pick(raw, ["endTime", "end", "exitingTime", "exitDateTime", "exitTime", "exitDate", "departureTime", "endDate", "to", "checkOut"]),
     amount: Number.isFinite(amount) ? amount : undefined,
     currency: pick(raw, ["currency", "currencyCode", "price.currency"]) || "NOK",
   };

@@ -24,7 +24,7 @@ The smaller operators at the bottom are checked in a single batched call (`/api/
 
 Lookups use the same public endpoints as each operator's own "pay without the app" page. They are undocumented and may change without notice. ParkPay's Norwegian portal (`betaling.parkpay.no`) runs on a Danish vendor's backend (Logos), hence the API host `parkpayapi.logos.dk`; it is only queried for Norwegian plates (`countryCode: "NO"`).
 
-To add an operator, add an entry to [`site/providers.js`](site/providers.js) and, if it blocks cross-origin requests, an upstream in [`functions/api/[provider]/[plate].js`](functions/api/%5Bprovider%5D/%5Bplate%5D.js).
+To add an operator, add an entry to [`site/providers.js`](site/providers.js) and, if it blocks cross-origin requests, an upstream in [`functions/api/[provider]/[plate].js`](functions/api/%5Bprovider%5D/%5Bplate%5D.js). If you know how long the operator gives you to pay, set `payWithinHours` and each hit will show its deadline (currently only TimePark: 48 hours after leaving).
 
 ## Architecture
 
