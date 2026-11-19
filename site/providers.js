@@ -97,7 +97,12 @@ const PROVIDERS = [
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.orderExists) return fromList(data.data);
-      if (data.error?.errorCode === "PARKING_NOT_FOUND") return { status: "clear" };
+      // Nothing to pay. The portal shows "Ingen parkering er registrert" for
+      // every orderExists: false reply that carries an error object, whatever
+      // its errorCode: PARKING_NOT_FOUND is the usual one, but some plates get
+      // others with the same meaning. Real failures come back as non-200
+      // (e.g. 400 without tenant-id) and are caught above.
+      if (data.orderExists === false && data.error && typeof data.error === "object") return { status: "clear" };
       throw new Error(data.error?.errorTitle || "Ukjent svar");
     },
   },
